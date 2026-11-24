@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChordScope – song key & chord finder</title>
+<style>
+:root{--bg:#eef3f1;--card:#fff;--ink:#16221f;--mute:#5d6d68;--line:#d3ddd9;--acc:#0e6b57;--hi:#f2b705;--on:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1715;--card:#17211e;--ink:#e8f0ed;--mute:#98a9a3;--line:#2a3a35;--acc:#4fd1b0;--hi:#f2b705;--on:#0f1715}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:860px;margin:0 auto;padding:20px 14px 60px}
+h1{font:700 2rem/1.1 Georgia,serif;margin:8px 0 4px}
+.sub{color:var(--mute);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+label{display:block;font-weight:600;margin:12px 0 6px}
+input[type=text],input[type=number],select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:110px}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;cursor:pointer;color:var(--mute)}
+.drop.over,.drop:hover{border-color:var(--acc);color:var(--ink)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+button{font:inherit;font-weight:600;padding:11px 16px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:var(--on);cursor:pointer}
+button.alt{background:transparent;color:var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--hi);outline-offset:1px}
+button:disabled{opacity:.5;cursor:wait}
+.seg{display:inline-flex;border:1px solid var(--acc);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;color:var(--acc)}
+.seg button.on{background:var(--acc);color:var(--on)}
+.hint{font-size:.85rem;color:var(--mute);margin:6px 0 0}
+#bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:12px}
+#bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+#res[hidden],.hid{display:none}
+.key{font:700 2.6rem/1 Georgia,serif;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:8px 12px;border-radius:8px;text-align:center;min-width:64px;cursor:pointer}
+.chip b{display:block;font:700 1.25rem Georgia,serif}.chip small{color:var(--mute)}
+.chip.on{background:var(--hi);border-color:var(--hi);color:#111}.chip.on small{color:#333}
+audio{width:100%;margin-top:8px}
+.ly{display:flex;flex-wrap:wrap;margin:0 0 14px;font:1.05rem Georgia,serif}
+.wd{display:inline-block;margin-right:.45em}
+.wd i{display:block;min-height:1.4em;font:700 .95rem system-ui,sans-serif;color:var(--acc);font-style:normal}
+.warn{color:#b3541e}
+.tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+</style>
+</head>
+<body>
+<main>
+<h1>ChordScope</h1>
+<p class="sub">Find the key and chords of any song. Everything runs in your browser.</p>
+
+<section class="card">
+  <label for="file" style="margin-top:0">Audio or video file</label>
+  <div class="drop" id="drop" tabindex="0" role="button">Tap to choose a file, or drop one here<br><small id="fname"></small></div>
+  <input id="file" type="file" accept="audio/*,video/*" hidden>
+  <label for="url">…or a direct link to an audio/video file</label>
+  <div class="row"><input id="url" type="text" inputmode="url" placeholder="https://example.com/song.mp3"><button class="alt" id="load" style="flex:0 0 auto">Load link</button></div>
+  <p class="hint">Links work only when the host allows browser access (CORS), such as direct .mp3/.wav/.mp4 files. YouTube, Spotify and similar sites block this: save the audio first, then upload it.</p>
+
+  <label for="lm">Lyrics (optional)</label>
+  <select id="lm">
+    <option value="none">Off – chords only</option>
+    <option value="paste">I'll paste the lyrics</option>
+    <option value="auto">Try to transcribe them automatically (experimental)</option>
+  </select>
+  <div id="pasteBox" class="hid">
+    <textarea id="lyr" placeholder="Paste lyrics here, one line per lyric line"></textarea>
+    <div class="row"><div><label for="ls">Singing starts (sec)</label><input id="ls" type="number" min="0" value="0"></div><div><label for="le">Singing ends (sec)</label><input id="le" type="number" min="0" value=""></div></div>
+    <p class="hint">Lyric timing is estimated by spreading the words between these two times, so chord positions are approximate. Adjust and press Analyze again.</p>
+  </div>
+  <p class="hint hid" id="autoHint">Downloads a ~40 MB speech model the first time. Works best on clear vocals; sung lyrics are often misheard.</p>
+  <p style="margin:16px 0 0"><button id="go" disabled>Analyze</button></p>
+  <div id="bar" class="hid"><i></i></div>
+  <p class="hint" id="stat" role="status"></p>
+</section>
+
+<section id="res" hidden>
+  <div class="card">
+    <p class="hint" style="margin:0" id="title"></p>
+    <p class="key" id="key"></p>
+    <audio id="aud" controls></audio>
+  </div>
+  <div class="card">
+    <div class="tools">
+      <div class="seg" role="group" aria-label="Chord style"><button id="vL" class="on">Chords</button><button id="vR">Roman numerals</button></div>
+      <button class="alt" id="pdf">Export PDF</button>
+    </div>
+    <div id="out"></div>
+    <p class="hint">Tap a chord to jump to that moment. Detection covers major and minor triads; extended chords show as their basic triad.</p>
+  </div>
+</section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const SH=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'],FL=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const ROM=['I','♭II','II','♭III','III','IV','♭V','V','♭VI','VI','♭VII','VII'];
+const S={blob:null,name:'',res:null,view:'L',words:[],dirty:true};
+const stat=t=>$('#stat').textContent=t, prog=p=>{$('#bar').classList.remove('hid');$('#bar i').style.width=(p*100)+'%'};
+const tick=()=>new Promise(r=>setTimeout(r));
+
+/* ---------- input ---------- */
+const drop=$('#drop'),fi=$('#file');
+drop.onclick=()=>fi.click();
+drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')fi.click()};
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
+drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])setSrc(e.dataTransfer.files[0],e.dataTransfer.files[0].name)};
+fi.onchange=()=>fi.files[0]&&setSrc(fi.files[0],fi.files[0].name);
+function setSrc(b,n){S.blob=b;S.name=n.replace(/\.[^.]+$/,'');S.dirty=true;$('#fname').textContent=n;$('#go').disabled=false;stat('')}
+$('#load').onclick=async()=>{
+  const u=$('#url').value.trim();if(!u)return;
+  stat('Fetching link…');
+  try{const r=await fetch(u);if(!r.ok)throw 0;const b=await r.blob();setSrc(b,decodeURIComponent(u.split('/').pop().split('?')[0])||'Linked song');stat('Link loaded. Press Analyze.')}
+  catch(e){stat('Could not read that link. The site may block browser access (YouTube and Spotify do). Download the audio and upload the file instead.');$('#stat').className='hint warn'}
+};
+$('#lm').onchange=()=>{const v=$('#lm').value;$('#pasteBox').classList.toggle('hid',v!=='paste');$('#autoHint').classList.toggle('hid',v!=='auto')};
+
+/* ---------- DSP ---------- */
+function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}
+ for(let l=2;l<=n;l<<=1){const a=-2*Math.PI/l,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=l){let cr=1,ci=0;for(let k=0;k<l/2;k++){const u=i+k,v=u+l/2,xr=re[v]*cr-im[v]*ci,xi=re[v]*ci+im[v]*cr;re[v]=re[u]-xr;im[v]=im[u]-xi;re[u]+=xr;im[u]+=xi;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t}}}}
+async function resample(buf,sr){const o=new OfflineAudioContext(1,Math.ceil(buf.duration*sr),sr),s=o.createBufferSource();s.buffer=buf;s.connect(o.destination);s.start();return (await o.startRendering()).getChannelData(0)}
+async function chroma(x,sr){
+  const N=8192,H=4096,win=new Float32Array(N).map((_,i)=>.5-.5*Math.cos(2*Math.PI*i/N)),pc=new Int8Array(N/2).fill(-1);
+  for(let k=1;k<N/2;k++){const f=k*sr/N;if(f>80&&f<2000)pc[k]=((Math.round(12*Math.log2(f/440)+69)%12)+12)%12}
+  const re=new Float32Array(N),im=new Float32Array(N),C=[];let n=0;const tot=Math.floor((x.length-N)/H);
+  for(let s=0;s+N<=x.length;s+=H,n++){
+    for(let i=0;i<N;i++){re[i]=x[s+i]*win[i];im[i]=0}fft(re,im);
+    const c=new Float32Array(12);for(let k=1;k<N/2;k++)if(pc[k]>=0)c[pc[k]]+=Math.sqrt(Math.hypot(re[k],im[k]));
+    let m=0;for(const v of c)m+=v*v;m=Math.sqrt(m)||1;for(let i=0;i<12;i++)c[i]/=m;C.push(c);
+    if(n%40===0){prog(.1+.5*n/tot);await tick()}
+  }
+  return {C,hop:H/sr,off:N/2/sr};
+}
+const MAJ=[6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88],MIN=[6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+function corr(a,b){const ma=a.reduce((x,y)=>x+y)/12,mb=b.reduce((x,y)=>x+y)/12;let n=0,da=0,db=0;for(let i=0;i<12;i++){n+=(a[i]-ma)*(b[i]-mb);da+=(a[i]-ma)**2;db+=(b[i]-mb)**2}return n/Math.sqrt(da*db)}
+function findKey(C){const t=new Array(12).fill(0);for(const c of C)for(let i=0;i<12;i++)t[i]+=c[i];let best={s:-9};
+  for(let k=0;k<12;k++)for(const m of [0,1]){const p=m?MIN:MAJ,r=t.map((_,i)=>p[(i-k+12)%12]),s=corr(t,r);if(s>best.s)best={s,tonic:k,minor:!!m}}return best}
+function decode(C,key){
+  const T=[];for(let r=0;r<12;r++)for(const iv of [[0,4,7],[0,3,7]]){const v=new Float32Array(12);iv.forEach(d=>v[(r+d)%12]=1/Math.sqrt(3));T.push({r,min:iv[1]===3,v})}
+  const sc=key.minor?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11],dia=new Set(sc.map(d=>(key.tonic+d)%12));
+  const bonus=T.map(t=>dia.has(t.r)?.04:0),K=24,pen=.4,Tn=C.length,bp=new Int8Array(Tn*K);let d=new Float32Array(K);
+  const e=(c,j)=>{let s=0;for(let i=0;i<12;i++)s+=c[i]*T[j].v[i];return s+bonus[j]};
+  for(let j=0;j<K;j++)d[j]=e(C[0],j);
+  for(let t=1;t<Tn;t++){const nd=new Float32Array(K);let bi=0;for(let i=1;i<K;i++)if(d[i]>d[bi])bi=i;
+    for(let j=0;j<K;j++){const a=d[j],b=d[bi]-pen;if(a>=b){nd[j]=a;bp[t*K+j]=j}else{nd[j]=b;bp[t*K+j]=bi}nd[j]+=e(C[t],j)}d=nd}
+  let j=0;for(let i=1;i<K;i++)if(d[i]>d[j])j=i;const path=new Array(Tn);
+  for(let t=Tn-1;t>=0;t--){path[t]=j;j=bp[t*K+j]}return path.map(i=>T[i]);
+}
+function segments(path,hop,off,dur){const segs=[];path.forEach((c,i)=>{const t=i===0?0:i*hop+off,l=segs[segs.length-1];if(l&&l.r===c.r&&l.min===c.min)return;if(l)l.e=t;segs.push({s:t,e:dur,r:c.r,min:c.min})});return segs}
+
+/* ---------- lyrics ---------- */
+async function transcribe(x16){
+  stat('Loading speech model (first time only)…');
+  const {pipeline}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+  const asr=await pipeline('automatic-speech-recognition','Xenova/whisper-tiny.en',{progress_callback:p=>{if(p.progress)stat('Downloading speech model… '+Math.round(p.progress)+'%')}});
+  stat('Listening for lyrics…');
+  const o=await asr(x16,{return_timestamps:'word',chunk_length_s:30,stride_length_s:5});
+  return o.chunks.map(c=>({t:c.text.trim(),s:c.timestamp[0],e:c.timestamp[1]??c.timestamp[0]+.4})).filter(w=>w.t);
+}
+function pasted(dur){
+  const lines=$('#lyr').value.split('\n').map(l=>l.trim()).filter(Boolean),ws=[];
+  lines.forEach(l=>l.split(/\s+/).forEach((t,i)=>ws.push({t,br:i===0})));
+  const a=+$('#ls').value||0,b=+$('#le').value||dur,tl=ws.reduce((s,w)=>s+w.t.length+1,0);let c=0;
+  ws.forEach(w=>{w.s=a+(b-a)*c/tl;c+=w.t.length+1;w.e=a+(b-a)*c/tl});return ws;
+}
+
+/* ---------- main ---------- */
+$('#go').onclick=async()=>{
+  const btn=$('#go');btn.disabled=true;$('#stat').className='hint';
+  try{
+    const lm=$('#lm').value;
+    if(S.dirty||!S.res){
+      stat('Decoding audio…');prog(.02);
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      const buf=await ac.decodeAudioData(await S.blob.arrayBuffer());ac.close&&ac.close();
+      const x=await resample(buf,11025);
+      const ch=await chroma(x,11025);stat('Finding key and chords…');
+      const key=findKey(ch.C),path=decode(ch.C,key);
+      S.res={key,segs:segments(path,ch.hop,ch.off,buf.duration),dur:buf.duration,buf};S.dirty=false;
+    }
+    S.words=[];
+    if(lm==='paste'&&$('#lyr').value.trim()){if(!$('#le').value)$('#le').value=Math.round(S.res.dur);S.words=pasted(S.res.dur)}
+    if(lm==='auto'){try{prog(.7);S.words=await transcribe(await resample(S.res.buf,16000))}catch(e){stat('Automatic lyrics failed on this device. Showing chords only. You can paste lyrics instead.');$('#stat').className='hint warn'}}
+    prog(1);show();if(!$('#stat').className.includes('warn'))stat('Done.');
+  }catch(e){console.error(e);stat('Could not read that file. Try an MP3, WAV, M4A or MP4.');$('#stat').className='hint warn'}
+  btn.disabled=false;
+};
+
+/* ---------- display ---------- */
+const flat=k=>k.minor?[2,7,0,5,10,3].includes(k.tonic):[5,10,3,8,1].includes(k.tonic);
+const nm=(r,k)=>(flat(k)?FL:SH)[r];
+const chordName=(s,k)=>nm(s.r,k)+(s.min?'m':'');
+function roman(s,k){const b=ROM[(s.r-k.tonic+12)%12];return s.min?b.toLowerCase():b}
+const lab=(s,k)=>S.view==='R'?roman(s,k):chordName(s,k);
+const keyName=k=>nm(k.tonic,k)+(k.minor?' minor':' major');
+const fmt=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
+
+function sheet(){
+  const segs=S.res.segs;let ci=0,intro=[],lines=[],cur=[],last=0;
+  for(const w of S.words){
+    if(cur.length&&(w.br||(w.br===undefined&&(cur.length>=9||w.s-last>1.2)))){lines.push(cur);cur=[]}
+    const ch=[];while(ci<segs.length&&segs[ci].s<=w.s+.05)ch.push(segs[ci++]);
+    if(!lines.length&&!cur.length&&ch.length>1){intro=ch.slice(0,-1);ch.splice(0,ch.length-1)}
+    cur.push({t:w.t,ch});last=w.e;
+  }
+  if(cur.length)lines.push(cur);return {intro,lines,rest:segs.slice(ci)};
+}
+function show(){
+  const {key,segs,dur}=S.res;$('#res').hidden=false;
+  $('#title').textContent=S.name;
+  $('#key').textContent=S.view==='R'?`Key of ${keyName(key)} · I = ${nm(key.tonic,key)}${key.minor?'m':''}`:`Key: ${keyName(key)}`;
+  const a=$('#aud');if(a.dataset.n!==S.name+dur){a.src=URL.createObjectURL(S.blob);a.dataset.n=S.name+dur}
+  const o=$('#out');o.innerHTML='';
+  const chips=(list,off)=>{const d=document.createElement('div');d.className='chips';list.forEach(s=>{const b=document.createElement('button');b.className='chip';b.dataset.s=s.s;b.innerHTML=`<b>${lab(s,key)}</b><small>${fmt(s.s)}</small>`;b.onclick=()=>{a.currentTime=s.s;a.play()};d.append(b)});return d};
+  if(!S.words.length){o.append(chips(segs))}
+  else{
+    const {intro,lines,rest}=sheet();
+    if(intro.length){o.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'Intro'}),chips(intro))}
+    lines.forEach(l=>{const d=document.createElement('div');d.className='ly';l.forEach(w=>{const s=document.createElement('span');s.className='wd';const i=document.createElement('i');i.textContent=w.ch.map(c=>lab(c,key)).join(' ');s.append(i,w.t);d.append(s)});o.append(d)});
+    if(rest.length)o.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'Ending'}),chips(rest));
+  }
+  tint();
+}
+function tint(){const t=$('#aud').currentTime;document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',+c.dataset.s<=t&&t<(+c.dataset.s+999)&&!c.nextSibling?false:false));
+  const cs=[...document.querySelectorAll('.chip')];cs.forEach((c,i)=>{const s=+c.dataset.s,n=cs[i+1]?+cs[i+1].dataset.s:1e9;c.classList.toggle('on',t>=s&&t<n)})}
+$('#aud').ontimeupdate=tint;
+$('#vL').onclick=()=>{S.view='L';$('#vL').classList.add('on');$('#vR').classList.remove('on');S.res&&show()};
+$('#vR').onclick=()=>{S.view='R';$('#vR').classList.add('on');$('#vL').classList.remove('on');S.res&&show()};
+
+/* ---------- PDF ---------- */
+$('#pdf').onclick=()=>{
+  const {jsPDF}=window.jspdf||{};if(!jsPDF){alert('PDF tool failed to load. Check your connection.');return}
+  const {key,segs}=S.res,d=new jsPDF({unit:'pt',format:'a4'}),M=44,W=595-2*M;let y=M;
+  const safe=s=>s.replace(/♭/g,'b').replace(/°/g,'dim').replace(/[^\x20-\x7E]/g,'');
+  const need=h=>{if(y+h>800){d.addPage();y=M}};
+  d.setFont('helvetica','bold');d.setFontSize(20);d.text(safe(S.name)||'Song',M,y+=16);
+  d.setFontSize(13);d.text('Key: '+safe(keyName(key))+(S.view==='R'?`  (I = ${safe(nm(key.tonic,key))}${key.minor?'m':''})`:''),M,y+=24);
+  d.setFont('helvetica','normal');d.setFontSize(10);d.text(S.view==='R'?'Roman numerals':'Chord names',M,y+=16);
+  y+=10;
+  const L=s=>safe(lab(s,key));
+  if(!S.words.length){
+    d.setFontSize(13);d.splitTextToSize(segs.map(L).join('   -   '),W).forEach(t=>{need(20);d.text(t,M,y+=20)});
+  }else{
+    const {intro,lines,rest}=sheet();
+    if(intro.length){d.setFont('helvetica','bold');d.setFontSize(12);need(20);d.text('Intro:  '+intro.map(L).join('  '),M,y+=20);y+=6}
+    lines.forEach(l=>{need(40);let x=M;y+=16;
+      l.forEach(w=>{const t=safe(w.t),c=w.ch.map(L).join(' ');d.setFont('helvetica','normal');d.setFontSize(12);const tw=d.getTextWidth(t);
+        d.setFont('helvetica','bold');d.setFontSize(11);const cw=d.getTextWidth(c);const ww=Math.max(tw,cw)+6;
+        if(x+ww>M+W){x=M;y+=36;need(30)}
+        d.text(c,x,y);d.setFont('helvetica','normal');d.setFontSize(12);d.text(t,x,y+14);x+=ww});
+      y+=22});
+    if(rest.length){y+=10;need(30);d.setFont('helvetica','bold');d.text('Ending:  '+rest.map(L).join('  '),M,y+=16)}
+  }
+  d.save((safe(S.name)||'song')+'-chords.pdf');
+};
+</script>
+</body>
+</html>
